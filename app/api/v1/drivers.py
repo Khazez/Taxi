@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.db.database import get_db
 from app.models.driver_profile import DriverProfile
 from app.core.dependencies import get_current_user
+from app.models.user import User, UserRole
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
 
