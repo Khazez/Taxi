@@ -28,6 +28,7 @@ from app.models.agreement import Agreement
 from app.models.rating import Rating
 from app.models.fleet_profile import FleetProfile, FleetDriver
 from app.models.payment import Payment
+from app.models.trip_request import TripRequest, TripOffer
 
 target_metadata = Base.metadata
 
