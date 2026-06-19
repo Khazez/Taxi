@@ -5,6 +5,7 @@ from app.db.database import get_db
 from app.models.user import User
 from app.schemas.user import UserRegister, UserLogin, UserResponse
 from app.core.security import hash_password, verify_password, create_access_token
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -33,3 +34,13 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
     
     token = create_access_token({"user_id": user.id, "role": user.role.value})
     return {"access_token": token}
+@router.post("/fcm-token")
+async def update_fcm_token(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Пользователь обновляет FCM токен своего устройства."""
+    current_user.fcm_token = token
+    await db.commit()
+    return {"message": "FCM токен обновлён"}

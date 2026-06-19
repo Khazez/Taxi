@@ -141,7 +141,22 @@ async def accept_offer(
     db.add(booking)
 
     # закрываем заявку
+    # закрываем заявку
     request.status = TripRequestStatus.accepted
     await db.commit()
     await db.refresh(request)
+
+    # уведомляем водителя
+    driver = await db.get(User, offer.driver_id)
+    if driver and driver.fcm_token:
+        from app.services.firebase_service import send_push
+        try:
+            send_push(
+                driver.fcm_token,
+                "Пассажир выбрал вас!",
+                "Ваш отклик принят. Проверьте детали поездки."
+            )
+        except Exception:
+            pass  # не ломаем если push не дошёл
+
     return request
