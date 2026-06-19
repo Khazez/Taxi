@@ -42,3 +42,14 @@ async def create_booking(
     
     await db.commit()
     return {"message": "Бронь создана", "id": booking.id, "total": float(booking.total_price)}
+    from app.services.booking_service import cancel_booking
+
+
+@router.delete("/{booking_id}")
+async def cancel_booking_endpoint(
+    booking_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    booking = await cancel_booking(booking_id, current_user.id, db)
+    return {"message": "Бронь отменена", "id": booking.id, "status": booking.status.value}

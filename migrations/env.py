@@ -29,6 +29,7 @@ from app.models.rating import Rating
 from app.models.fleet_profile import FleetProfile, FleetDriver
 from app.models.payment import Payment
 from app.models.trip_request import TripRequest, TripOffer
+from app.models.settings import PlatformSettings
 
 target_metadata = Base.metadata
 

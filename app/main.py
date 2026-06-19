@@ -11,6 +11,7 @@ from app.api.v1.ratings import router as ratings_router
 from app.api.v1.fleet import router as fleet_router
 from app.api.v1.payments import router as payments_router
 from app.api.v1.trip_requests import router as trip_requests_router
+from app.api.v1.settings import router as settings_router   
 
 app = FastAPI(title="Межгород Такси API")
 
@@ -24,6 +25,7 @@ app.include_router(ratings_router, prefix="/api/v1")
 app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(payments_router, prefix="/api/v1")
 app.include_router(trip_requests_router, prefix="/api/v1")
+app.include_router(settings_router, prefix="/api/v1")
 
 @app.get("/")
 def root():

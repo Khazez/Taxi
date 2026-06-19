@@ -41,3 +41,60 @@ async def get_driver_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="Профиль не найден")
     return {"data": profile}
+    from app.models.user import User, UserRole
+
+
+@router.get("/unverified")
+async def get_unverified_drivers(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Админ видит список неверифицированных водителей."""
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Только администратор")
+
+    result = await db.execute(
+        select(DriverProfile).where(DriverProfile.is_verified == False)
+    )
+    return {"data": result.scalars().all()}
+
+
+@router.patch("/{driver_id}/verify")
+async def verify_driver(
+    driver_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Админ одобряет водителя."""
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Только администратор")
+
+    profile = await db.get(DriverProfile, driver_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+
+    profile.is_verified = True
+    profile.rejection_reason = None
+    await db.commit()
+    return {"message": "Водитель верифицирован"}
+
+
+@router.patch("/{driver_id}/reject")
+async def reject_driver(
+    driver_id: int,
+    reason: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Админ отклоняет водителя с указанием причины."""
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Только администратор")
+
+    profile = await db.get(DriverProfile, driver_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+
+    profile.is_verified = False
+    profile.rejection_reason = reason
+    await db.commit()
+    return {"message": "Водитель отклонён", "reason": reason}
