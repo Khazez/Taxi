@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.db.database import get_db
 from app.models.trip import Trip, TripStatus
 from datetime import datetime
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/trips", tags=["trips"])
 
@@ -26,8 +27,10 @@ async def create_trip(
     departure_time: datetime,
     seats_total: int,
     price_per_seat: float,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
+    
     trip = Trip(
         route_id=route_id,
         driver_id=driver_id,

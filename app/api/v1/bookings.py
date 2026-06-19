@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.db.database import get_db
 from app.models.booking import Booking, BookingStatus
 from app.models.trip import Trip
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -13,7 +14,8 @@ async def create_booking(
     passenger_id: int,
     seats_count: int,
     comment: str = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
     # Находим поездку
     result = await db.execute(select(Trip).where(Trip.id == trip_id))
