@@ -18,10 +18,11 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     phone = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=True)
     password_hash = Column(String, nullable=False)
     role = Column(Enum(UserRole), default=UserRole.passenger)
     fcm_token = Column(String, nullable=True)  # токен устройства для push
     created_at = Column(DateTime, server_default=func.now())
 
-    agreements = relationship("Agreement", back_populates="user")
-    fleet_profile = relationship("FleetProfile", back_populates="user", uselist=False)
+    agreements = relationship("Agreement", lazy="noload")
+    fleet_profile = relationship("FleetProfile", uselist=False, lazy="noload")

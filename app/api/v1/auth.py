@@ -6,6 +6,7 @@ from app.models.user import User
 from app.schemas.user import UserRegister, UserLogin, UserResponse
 from app.core.security import hash_password, verify_password, create_access_token
 from app.core.dependencies import get_current_user
+from app.models.user import User, UserRole
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -44,3 +45,21 @@ async def update_fcm_token(
     current_user.fcm_token = token
     await db.commit()
     return {"message": "FCM токен обновлён"}
+@router.post("/admin/login")
+async def admin_login(
+    email: str,
+    password: str,
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy.orm import noload
+    result = await db.execute(select(User).where(User.email == email).options(noload("*")))
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Неверный email или пароль")
+
+    if user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Нет доступа")
+
+    token = create_access_token({"user_id": user.id, "role": user.role.value})
+    return {"access_token": token}
