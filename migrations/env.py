@@ -4,7 +4,7 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-from app.models.driver_profile import DriverProfile
+from app.core.config import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -19,11 +19,15 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-from app.models.user import Base
+from app.models.user import Base, User
 from app.models.route import Route, RoutePrice
 from app.models.trip import Trip
 from app.models.booking import Booking
-from app.core.config import settings
+from app.models.driver_profile import DriverProfile
+from app.models.agreement import Agreement
+from app.models.rating import Rating
+from app.models.fleet_profile import FleetProfile, FleetDriver
+from app.models.payment import Payment
 
 target_metadata = Base.metadata
 

@@ -1,12 +1,15 @@
 from sqlalchemy import Column, Integer, Numeric, ForeignKey, DateTime, String, Enum
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.db.database import Base
 import enum
+
 
 class TripStatus(enum.Enum):
     active = "active"
     completed = "completed"
     cancelled = "cancelled"
+
 
 class Trip(Base):
     __tablename__ = "trips"
@@ -20,3 +23,5 @@ class Trip(Base):
     price_per_seat = Column(Numeric(10, 2), nullable=False)
     status = Column(Enum(TripStatus), default=TripStatus.active)
     created_at = Column(DateTime, server_default=func.now())
+
+    ratings = relationship("Rating", back_populates="trip")
