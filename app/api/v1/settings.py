@@ -17,7 +17,7 @@ async def get_all_settings(
     current_user: User = Depends(get_current_user),
 ):
     """Только админ видит все настройки."""
-    if current_user.role != UserRole.admin:
+    if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Только администратор")
 
     result = await db.execute(select(PlatformSettings))
