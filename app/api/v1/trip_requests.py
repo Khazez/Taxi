@@ -7,7 +7,7 @@ from app.core.dependencies import get_current_user
 from app.models.trip_request import TripRequest, TripRequestStatus, TripOffer
 from app.models.trip import Trip
 from app.models.booking import Booking, BookingStatus
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.trip_request import TripRequestCreate, TripRequestOut, TripOfferCreate, TripOfferOut
 
 router = APIRouter(prefix="/trip-requests", tags=["trip-requests"])
@@ -17,14 +17,14 @@ router = APIRouter(prefix="/trip-requests", tags=["trip-requests"])
 async def create_request(
     data: TripRequestCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Пассажир создаёт заявку на поездку."""
-    if current_user.role != UserRole.passenger:
+    if current_user.get("role") != "passenger":
         raise HTTPException(status_code=403, detail="Только пассажир может создать заявку")
 
     request = TripRequest(
-        passenger_id=current_user.id,
+        passenger_id=current_user.get("user_id"),
         route_id=data.route_id,
         departure_date=data.departure_date,
         seats_needed=data.seats_needed,
@@ -38,17 +38,15 @@ async def create_request(
 
 @router.get("/", response_model=list[TripRequestOut])
 async def get_open_requests(
-    route_id: int,
+    route_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Водитель видит открытые заявки по маршруту."""
-    result = await db.execute(
-        select(TripRequest).where(
-            TripRequest.route_id == route_id,
-            TripRequest.status == TripRequestStatus.open,
-        )
-    )
+    """Открытые заявки пассажиров. Если route_id передан — фильтруем по маршруту."""
+    query = select(TripRequest).where(TripRequest.status == TripRequestStatus.open)
+    if route_id is not None:
+        query = query.where(TripRequest.route_id == route_id)
+    result = await db.execute(query)
     return result.scalars().all()
 
 
@@ -56,22 +54,20 @@ async def get_open_requests(
 async def create_offer(
     data: TripOfferCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Водитель откликается на заявку пассажира."""
-    if current_user.role != UserRole.driver:
+    if current_user.get("role") != "driver":
         raise HTTPException(status_code=403, detail="Только водитель может откликнуться")
 
-    # проверяем что заявка открыта
     request = await db.get(TripRequest, data.request_id)
     if not request or request.status != TripRequestStatus.open:
         raise HTTPException(status_code=404, detail="Заявка не найдена или уже закрыта")
 
-    # проверяем что водитель не откликался уже
     existing = await db.execute(
         select(TripOffer).where(
             TripOffer.request_id == data.request_id,
-            TripOffer.driver_id == current_user.id,
+            TripOffer.driver_id == current_user.get("user_id"),
         )
     )
     if existing.scalar_one_or_none():
@@ -80,7 +76,7 @@ async def create_offer(
     offer = TripOffer(
         request_id=data.request_id,
         trip_id=data.trip_id,
-        driver_id=current_user.id,
+        driver_id=current_user.get("user_id"),
     )
     db.add(offer)
     await db.commit()
@@ -92,13 +88,13 @@ async def create_offer(
 async def get_offers(
     request_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Пассажир видит отклики на свою заявку."""
     request = await db.get(TripRequest, request_id)
     if not request:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
-    if request.passenger_id != current_user.id:
+    if request.passenger_id != current_user.get("user_id"):
         raise HTTPException(status_code=403, detail="Это не ваша заявка")
 
     result = await db.execute(
@@ -112,11 +108,11 @@ async def accept_offer(
     request_id: int,
     offer_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Пассажир выбирает водителя — заявка закрывается, бронь создаётся."""
     request = await db.get(TripRequest, request_id)
-    if not request or request.passenger_id != current_user.id:
+    if not request or request.passenger_id != current_user.get("user_id"):
         raise HTTPException(status_code=403, detail="Нет доступа")
     if request.status != TripRequestStatus.open:
         raise HTTPException(status_code=400, detail="Заявка уже закрыта")
@@ -125,28 +121,23 @@ async def accept_offer(
     if not offer or offer.request_id != request_id:
         raise HTTPException(status_code=404, detail="Отклик не найден")
 
-    # получаем поездку чтобы узнать цену
     trip = await db.get(Trip, offer.trip_id)
     if not trip:
         raise HTTPException(status_code=404, detail="Поездка не найдена")
 
-    # создаём бронь автоматически
     booking = Booking(
         trip_id=trip.id,
-        passenger_id=current_user.id,
+        passenger_id=current_user.get("user_id"),
         seats_count=request.seats_needed,
         total_price=trip.price_per_seat * request.seats_needed,
         status=BookingStatus.confirmed,
     )
     db.add(booking)
 
-    # закрываем заявку
-    # закрываем заявку
     request.status = TripRequestStatus.accepted
     await db.commit()
     await db.refresh(request)
 
-    # уведомляем водителя
     driver = await db.get(User, offer.driver_id)
     if driver and driver.fcm_token:
         from app.services.firebase_service import send_push
@@ -157,6 +148,6 @@ async def accept_offer(
                 "Ваш отклик принят. Проверьте детали поездки."
             )
         except Exception:
-            pass  # не ломаем если push не дошёл
+            pass
 
     return request
