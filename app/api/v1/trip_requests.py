@@ -8,6 +8,7 @@ from app.models.trip_request import TripRequest, TripRequestStatus, TripOffer
 from app.models.trip import Trip
 from app.models.booking import Booking, BookingStatus
 from app.models.user import User
+from app.models.route import Route
 from app.schemas.trip_request import TripRequestCreate, TripRequestOut, TripOfferCreate, TripOfferOut
 
 router = APIRouter(prefix="/trip-requests", tags=["trip-requests"])
@@ -48,6 +49,31 @@ async def get_open_requests(
         query = query.where(TripRequest.route_id == route_id)
     result = await db.execute(query)
     return result.scalars().all()
+
+
+@router.get("/my")
+async def get_my_requests(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(TripRequest, Route)
+        .join(Route, TripRequest.route_id == Route.id)
+        .where(TripRequest.passenger_id == current_user.get("user_id"))
+        .order_by(TripRequest.id.desc())
+    )
+    rows = result.all()
+    return [
+        {
+            "id": req.id,
+            "status": req.status.value,
+            "seats_needed": req.seats_needed,
+            "departure_date": req.departure_date.isoformat() if req.departure_date else None,
+            "route_name": f"{r.city_from} → {r.city_to}",
+            "comment": req.comment,
+        }
+        for req, r in rows
+    ]
 
 
 @router.post("/offers", response_model=TripOfferOut)

@@ -1,6 +1,9 @@
+import re
+import random
+import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from app.db.database import get_db
 from app.models.user import User
 from app.schemas.user import UserRegister, UserLogin, UserResponse
@@ -9,6 +12,26 @@ from app.core.dependencies import get_current_user
 from app.models.user import User, UserRole
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# phone -> (code, expires_at)
+_otp_store: dict[str, tuple[str, float]] = {}
+
+
+def _normalize(phone: str) -> str:
+    """Приводит номер к виду +7XXXXXXXXXX."""
+    digits = re.sub(r'\D', '', phone)
+    if len(digits) == 11 and digits.startswith('8'):
+        digits = '7' + digits[1:]
+    elif len(digits) == 10:
+        digits = '7' + digits
+    return f'+{digits}' if digits.startswith('7') else phone
+
+
+def _gen_otp(phone: str) -> str:
+    key = _normalize(phone)
+    code = str(random.randint(1000, 9999))
+    _otp_store[key] = (code, time.time() + 300)
+    return code
 
 @router.post("/register")
 async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
@@ -24,6 +47,56 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     return {"message": "Пользователь создан"}
+
+@router.post("/send-otp")
+async def send_otp(phone: str, db: AsyncSession = Depends(get_db)):
+    """Отправить код на телефон. Пока код печатается в консоль."""
+    key = _normalize(phone)
+    code = _gen_otp(key)
+    print(f"[SMS] {key} → код: {code}")
+    return {"message": "Код отправлен"}
+
+
+@router.post("/verify-otp")
+async def verify_otp(
+    phone: str,
+    code: str,
+    name: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Проверить код. Если новый пользователь — нужно передать name."""
+    key = _normalize(phone)
+    entry = _otp_store.get(key)
+    if not entry:
+        raise HTTPException(status_code=400, detail="Неверный или истёкший код")
+    stored, expires = entry
+    if time.time() > expires:
+        del _otp_store[key]
+        raise HTTPException(status_code=400, detail="Неверный или истёкший код")
+    if stored != code:
+        raise HTTPException(status_code=400, detail="Неверный или истёкший код")
+
+    # Ищем пользователя по нормализованному (+7...) и старому (8...) форматам
+    alt = '8' + key[2:] if key.startswith('+7') else key
+    result = await db.execute(
+        select(User).where(or_(User.phone == key, User.phone == alt))
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        if not name:
+            raise HTTPException(status_code=400, detail="Новый пользователь — укажите имя")
+        del _otp_store[key]
+        user = User(name=name, phone=key, password_hash="otp")
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    else:
+        del _otp_store[key]
+
+    token = create_access_token({"user_id": user.id, "role": user.role.value})
+    return {"access_token": token}
+
 
 @router.post("/login")
 async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
