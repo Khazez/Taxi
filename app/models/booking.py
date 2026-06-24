@@ -24,4 +24,13 @@ class Booking(Base):
     status = Column(Enum(BookingStatus), default=BookingStatus.pending)
     created_at = Column(DateTime, server_default=func.now())
 
+    pickup_address       = Column(String, nullable=True)
+    entrance             = Column(String, nullable=True)
+    extra_pickups        = Column(Text, nullable=True)   # JSON: [{address,entrance?}]
+    destination_address  = Column(String, nullable=True)
+    destination_entrance = Column(String, nullable=True)
+    extra_destinations   = Column(Text, nullable=True)   # JSON: [{address,entrance?}]
+    contact_name         = Column(String, nullable=True)
+    contact_phone        = Column(String, nullable=True)
+
     payment = relationship("Payment", back_populates="booking", uselist=False)
