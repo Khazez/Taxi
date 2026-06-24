@@ -8,6 +8,7 @@ from app.models.user import User
 from app.models.trip import Trip
 from app.models.booking import Booking
 from app.models.driver_profile import DriverProfile
+from app.models.route import Route
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -40,6 +41,24 @@ async def get_all_trips(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Trip).order_by(Trip.id.desc()))
-    trips = result.scalars().all()
-    return {"data": trips}
+    result = await db.execute(
+        select(Trip, Route)
+        .join(Route, Trip.route_id == Route.id)
+        .order_by(Trip.id.desc())
+    )
+    rows = result.all()
+    return {
+        "data": [
+            {
+                "id": trip.id,
+                "route_name": f"{route.city_from} → {route.city_to}",
+                "driver_id": trip.driver_id,
+                "departure_time": trip.departure_time.isoformat() if trip.departure_time else None,
+                "seats_total": trip.seats_total,
+                "seats_available": trip.seats_available,
+                "price_per_seat": trip.price_per_seat,
+                "status": trip.status.value if hasattr(trip.status, 'value') else trip.status,
+            }
+            for trip, route in rows
+        ]
+    }
