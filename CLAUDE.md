@@ -142,71 +142,82 @@ FIREBASE_CREDENTIALS_PATH=./firebase-key.json
 CANCELLATION_FEE_PERCENT=20
 ```
 
+## Адресная модель (важно!)
+
+Все адреса хранятся в виде объектов `{address: str, entrance: str | None}`.
+Поля в `trip_requests` и `bookings`:
+- `pickup_address` / `entrance` — главный адрес подачи
+- `extra_pickups` — TEXT (JSON): `[{address, entrance?}, ...]`
+- `destination_address` / `destination_entrance` — адрес назначения
+- `extra_destinations` — TEXT (JSON): `[{address, entrance?}, ...]`
+
+Pydantic: класс `ExtraAddress` в `app/schemas/trip_request.py`.
+Backward-compat: field_validator обрабатывает как старые строки, так и новые объекты.
+
 ## Текущий статус
 
-### Бэкенд ✅ (полностью готов)
-- [x] FastAPI + PostgreSQL + Alembic
-- [x] Auth: регистрация, JWT, admin/login
-- [x] Все модели и эндпоинты
+### Бэкенд ✅
+- [x] FastAPI + PostgreSQL + asyncpg
+- [x] Auth: регистрация, JWT, OTP, admin/login
+- [x] Models: User, Trip, TripRequest, TripOffer, Booking, Route, Payment, Rating
+- [x] Полные адреса: pickup/destination + entrance + extra_pickups/extra_destinations
+- [x] trip_requests.py: create, list, my, update, cancel, offer, accept_offer
+- [x] bookings.py: create, my, for-driver (все поля адресов)
+- [x] trips.py: my-offers (все адреса пассажира + passenger_name)
 - [x] MinIO, Firebase, Docker-compose
-- [x] admin.py: /admin/stats и /admin/trips
+- [x] admin.py, settings.py, ratings.py
 
-### Веб-панель (taxi-admin) ✅ (полностью готова)
-- [x] Логин: app/login/page.tsx
-- [x] Дашборд: app/dashboard/page.tsx (реальная статистика)
-- [x] Водители: app/dashboard/drivers/page.tsx (верификация)
-- [x] Маршруты: app/dashboard/routes/page.tsx
-- [x] Поездки: app/dashboard/trips/page.tsx
-- [x] Настройки: app/dashboard/settings/page.tsx
+### Веб-панель (taxi-admin) ✅
+- [x] Логин, дашборд, водители (верификация), маршруты, поездки, настройки
 
-### Flutter — приложение пассажира (zholaushy_passenger)
-- [x] Проект создан: C:\Users\KhazezB\zholaushy_passenger
-- [x] Пакеты: dio 5.9.2, go_router 17.3.0
-- [x] main.dart — GoRouter, dart:html localStorage для токена
-- [x] screens/login_screen.dart — логин через /auth/login
-- [x] screens/register_screen.dart — регистрация + автологин
-- [x] screens/home_screen.dart — два таба: Попутки + Поездки
-- [x] Создать заявку: выпадающий список маршрутов + дата + время ✅
-- [x] GET /api/v1/trip-requests/ — работает (route_id теперь необязательный)
-- [ ] Экран деталей поездки + бронирование
-- [ ] Профиль пользователя
-- [ ] История поездок
-- [ ] Уведомления об офферах от водителей
+### Flutter — пассажир (zholaushy_passenger) ✅
+- [x] GoRouter, dart:html localStorage, token = 'token'
+- [x] Таб Поездки: создать заявку, список активных заявок/броней, экран офферов
+- [x] Таб Попутки: поиск поездок водителей, бронирование
+- [x] Форма заявки/брони: адрес А + подъезд, доп. адреса подачи (_AddrPair), адрес Б + подъезд, доп. точки назначения
+- [x] _AddrPair класс: пара контроллеров {address, entrance} для списков адресов
+- [x] Принятие оффера: bottom sheet подтверждения адреса перед accept
+- [x] История поездок, профиль, поддержка, настройки
 
-### Важные исправления (сессия 2026-06-21)
-- **trip_requests.py**: current_user — dict, использовать .get("user_id") и .get("role")
-- **GET /trip-requests/**: route_id сделан необязательным параметром
-- **CORS**: allow_origins=["*"], allow_credentials=False (Flutter работает на другом порту)
-- **Маршруты в БД**: добавлены тестовые маршруты (Актобе → Актау, Уральск, Алматы, Астана, Атырау)
+### Flutter — водитель (zholaushy_driver) ✅
+- [x] GoRouter, dart:html localStorage, token = 'driver_token'
+- [x] Таб Заявки: открытые заявки пассажиров, фильтр по маршруту, откликнуться с ценой
+  - Развёрнутая карточка: все адреса А/Б с метками и подъездами
+- [x] Таб Мои поездки: создание поездки, список своих поездок
+  - _PassengerRow: все адреса пассажира (подача + назначение + доп.)
+- [x] Таб Отклики: _OfferCard с данными пассажира и всеми адресами
+  - Фильтрация: отменённые заявки (request_status=cancelled) не показываются
 
-### Flutter — приложение водителя
-- [ ] Не начато
+### Важные детали Flutter
+- token ключи: `token` (пассажир), `driver_token` (водитель)
+- Dio: всегда Content-Type: application/json в Options для POST/PATCH
+- extra_pickups/extra_destinations: list of `{address, entrance?}` — НЕ plain strings
+- _addrLine() — top-level функция в driver/home_screen.dart для форматирования адреса из Map
 
 ## Структура файлов
 
 ```
-taxi-backend/                 # https://github.com/Khazez/taxi
+taxi-backend/                 # C:\Users\KhazezB\taxi-backend
 ├── app/
 │   ├── main.py               # CORS: allow_origins=["*"], allow_credentials=False
 │   ├── api/v1/
-│   │   ├── auth.py           # register возвращает message, НЕ токен
-│   │   ├── trip_requests.py  # роутер с prefix /trip-requests (дефис!)
-│   │   ├── admin.py          # создан вручную
-│   │   └── settings.py       # current_user.get("role")
-│   └── db/database.py        # НЕ трогать, только движок + get_db
-├── insert_setting.py         # psycopg2 seed настроек
+│   │   ├── auth.py           # register → message, login → token, OTP
+│   │   ├── trip_requests.py  # prefix /trip-requests (ДЕФИС!)
+│   │   ├── trips.py          # /trips/my-offers возвращает все адреса
+│   │   ├── bookings.py       # /bookings/for-driver, /bookings/my
+│   │   ├── admin.py, ratings.py, drivers.py, routes.py, settings.py
+│   ├── models/               # booking.py, trip_request.py — все адресные поля
+│   ├── schemas/trip_request.py  # ExtraAddress, TripRequestOut, field_validator
+│   └── db/database.py
+├── add_destination_and_extra_pickups.py       # миграция (выполнена)
+├── add_destination_entrance_and_extra_destinations.py  # миграция (выполнена)
 └── docker-compose.yml
 
-taxi-admin/                   # https://github.com/Khazez/taxi_admin
-└── app/dashboard/            # все страницы готовы
+zholaushy_passenger/          # C:\Users\KhazezB\zholaushy_passenger
+└── lib/screens/home_screen.dart  # _AddrPair, все формы, _OffersScreen
 
-zholaushy_passenger/          # Flutter пассажир
-└── lib/
-    ├── main.dart
-    └── screens/
-        ├── login_screen.dart
-        ├── register_screen.dart
-        └── home_screen.dart
+zholaushy_driver/             # C:\Users\KhazezB\zholaushy_driver
+└── lib/screens/home_screen.dart  # _addrLine(), _PassengerRow, _OfferCard, _PassengerRequestCard
 ```
 
 ## Как использовать этот файл
