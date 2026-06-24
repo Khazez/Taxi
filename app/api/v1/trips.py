@@ -125,3 +125,22 @@ async def complete_trip(
     trip.status = TripStatus.completed
     await db.commit()
     return {"message": "Поездка завершена"}
+
+
+@router.patch("/{trip_id}/cancel")
+async def cancel_trip(
+    trip_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Водитель отменяет поездку."""
+    trip = await db.get(Trip, trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Поездка не найдена")
+    if trip.driver_id != current_user.get("user_id"):
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    if trip.status != TripStatus.active:
+        raise HTTPException(status_code=400, detail="Поездка уже завершена или отменена")
+    trip.status = TripStatus.cancelled
+    await db.commit()
+    return {"message": "Поездка отменена"}

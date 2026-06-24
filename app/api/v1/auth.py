@@ -39,14 +39,18 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)):
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Телефон уже зарегистрирован")
     
+    role = UserRole.driver if data.role == "driver" else UserRole.passenger
     user = User(
         name=data.name,
         phone=data.phone,
-        password_hash=hash_password(data.password)
+        password_hash=hash_password(data.password),
+        role=role,
     )
     db.add(user)
     await db.commit()
-    return {"message": "Пользователь создан"}
+    await db.refresh(user)
+    token = create_access_token({"user_id": user.id, "role": user.role.value})
+    return {"message": "Пользователь создан", "access_token": token}
 
 @router.post("/send-otp")
 async def send_otp(phone: str, db: AsyncSession = Depends(get_db)):
@@ -108,6 +112,38 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
     
     token = create_access_token({"user_id": user.id, "role": user.role.value})
     return {"access_token": token}
+@router.get("/me")
+async def get_me(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    user = await db.get(User, current_user.get("user_id"))
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return {
+        "id": user.id,
+        "name": user.name,
+        "phone": user.phone,
+        "role": user.role.value,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    }
+
+
+@router.patch("/me")
+async def update_me(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    user = await db.get(User, current_user.get("user_id"))
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if "name" in data and data["name"]:
+        user.name = data["name"].strip()
+    await db.commit()
+    return {"message": "Профиль обновлён", "name": user.name}
+
+
 @router.post("/fcm-token")
 async def update_fcm_token(
     token: str,

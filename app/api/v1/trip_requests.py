@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.db.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.trip_request import TripRequest, TripRequestStatus, TripOffer
-from app.models.trip import Trip
+from app.models.trip import Trip, TripStatus
 from app.models.booking import Booking, BookingStatus
 from app.models.user import User
 from app.models.route import Route
@@ -237,6 +237,60 @@ async def create_offer(
     await db.commit()
     await db.refresh(offer)
     return {"id": offer.id, "request_id": offer.request_id, "price_per_seat": float(data.price_per_seat)}
+
+
+@router.delete("/offers/{offer_id}")
+async def cancel_offer(
+    offer_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Водитель отзывает свой отклик (в т.ч. после принятия — поездка отменяется, заявка снова открывается)."""
+    offer = await db.get(TripOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=404, detail="Отклик не найден")
+    if offer.driver_id != current_user.get("user_id"):
+        raise HTTPException(status_code=403, detail="Нет доступа")
+
+    request = await db.get(TripRequest, offer.request_id)
+
+    if request and request.status == TripRequestStatus.accepted:
+        # Отменяем поездку и бронь, возвращаем заявку в open
+        if offer.trip_id:
+            trip = await db.get(Trip, offer.trip_id)
+            if trip:
+                trip.status = TripStatus.cancelled
+                # Отменяем все брони этой поездки
+                bookings_result = await db.execute(
+                    select(Booking).where(Booking.trip_id == trip.id)
+                )
+                for booking in bookings_result.scalars().all():
+                    booking.status = BookingStatus.cancelled
+        else:
+            # Trip создавался автоматически при accept — ищем по driver+route+time
+            from sqlalchemy import and_
+            trips_result = await db.execute(
+                select(Trip).where(
+                    and_(
+                        Trip.driver_id == offer.driver_id,
+                        Trip.route_id == request.route_id,
+                    )
+                ).order_by(Trip.id.desc()).limit(1)
+            )
+            trip = trips_result.scalar_one_or_none()
+            if trip and trip.status == TripStatus.active:
+                trip.status = TripStatus.cancelled
+                bookings_result = await db.execute(
+                    select(Booking).where(Booking.trip_id == trip.id)
+                )
+                for booking in bookings_result.scalars().all():
+                    booking.status = BookingStatus.cancelled
+
+        request.status = TripRequestStatus.open
+
+    await db.delete(offer)
+    await db.commit()
+    return {"message": "Отклик отозван"}
 
 
 @router.get("/{request_id}/offers")

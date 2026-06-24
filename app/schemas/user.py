@@ -1,9 +1,11 @@
 from pydantic import BaseModel
+from typing import Optional
 
 class UserRegister(BaseModel):
     name: str
     phone: str
     password: str
+    role: Optional[str] = "passenger"  # "passenger" или "driver"
 
 class UserLogin(BaseModel):
     phone: str
