@@ -66,6 +66,7 @@ async def verify_otp(
     phone: str,
     code: str,
     name: str | None = None,
+    role: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Проверить код. Если новый пользователь — нужно передать name."""
@@ -87,16 +88,21 @@ async def verify_otp(
     )
     user = result.scalar_one_or_none()
 
+    new_role = UserRole.driver if role == "driver" else UserRole.passenger
+
     if user is None:
         if not name:
             raise HTTPException(status_code=400, detail="Новый пользователь — укажите имя")
         del _otp_store[key]
-        user = User(name=name, phone=key, password_hash="otp")
+        user = User(name=name, phone=key, password_hash="otp", role=new_role)
         db.add(user)
         await db.commit()
         await db.refresh(user)
     else:
         del _otp_store[key]
+        if role in ("passenger", "driver"):
+            user.role = new_role
+            await db.commit()
 
     token = create_access_token({"user_id": user.id, "role": user.role.value})
     return {"access_token": token}
