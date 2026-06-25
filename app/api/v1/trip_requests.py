@@ -11,6 +11,7 @@ from app.models.trip import Trip, TripStatus
 from app.models.booking import Booking, BookingStatus
 from app.models.user import User
 from app.models.route import Route
+from app.models.driver_profile import DriverProfile
 
 from app.schemas.trip_request import TripRequestCreate, TripRequestOut
 
@@ -98,18 +99,25 @@ async def get_my_requests(
         }
         if req.status == TripRequestStatus.accepted:
             offer_result = await db.execute(
-                select(TripOffer, User)
+                select(TripOffer, User, DriverProfile)
                 .join(User, TripOffer.driver_id == User.id)
+                .outerjoin(DriverProfile, DriverProfile.user_id == TripOffer.driver_id)
                 .where(TripOffer.request_id == req.id)
                 .limit(1)
             )
             offer_row = offer_result.first()
             if offer_row:
-                offer_obj, driver = offer_row
+                offer_obj, driver, profile = offer_row
                 item["driver_name"] = driver.name
                 item["driver_phone"] = driver.phone
                 if offer_obj.price_per_seat:
                     item["agreed_price"] = float(offer_obj.price_per_seat) * (req.seats_needed or 1)
+                if profile:
+                    item["car_brand"] = profile.car_brand
+                    item["car_model"] = profile.car_model
+                    item["car_color"] = profile.car_color
+                    item["car_number"] = profile.car_number
+                    item["car_year"] = profile.car_year
         output.append(item)
 
     return output
@@ -195,7 +203,22 @@ async def cancel_request(
         raise HTTPException(status_code=400, detail="Нельзя отменить принятую заявку")
 
     request.status = TripRequestStatus.cancelled
+
+    offers_result = await db.execute(
+        select(TripOffer).where(TripOffer.request_id == request_id)
+    )
+    offers = offers_result.scalars().all()
     await db.commit()
+
+    from app.services.firebase_service import send_push
+    for offer in offers:
+        driver = await db.get(User, offer.driver_id)
+        if driver and driver.fcm_token:
+            try:
+                send_push(driver.fcm_token, "Заявка отменена", "Пассажир отменил заявку")
+            except Exception:
+                pass
+
     return {"message": "Заявка отменена"}
 
 
@@ -255,6 +278,37 @@ async def create_offer(
     return {"id": offer.id, "request_id": offer.request_id, "price_per_seat": float(data.price_per_seat)}
 
 
+@router.delete("/{request_id}/offers/{offer_id}")
+async def decline_offer(
+    request_id: int,
+    offer_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Пассажир отклоняет конкретный оффер водителя."""
+    request = await db.get(TripRequest, request_id)
+    if not request or request.passenger_id != current_user.get("user_id"):
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    if request.status != TripRequestStatus.open:
+        raise HTTPException(status_code=400, detail="Заявка уже закрыта")
+
+    offer = await db.get(TripOffer, offer_id)
+    if not offer or offer.request_id != request_id:
+        raise HTTPException(status_code=404, detail="Отклик не найден")
+
+    driver = await db.get(User, offer.driver_id)
+    if driver and driver.fcm_token:
+        from app.services.firebase_service import send_push
+        try:
+            send_push(driver.fcm_token, "Отклик отклонён", "Пассажир не принял ваш отклик")
+        except Exception:
+            pass
+
+    await db.delete(offer)
+    await db.commit()
+    return {"message": "Отклик отклонён"}
+
+
 @router.delete("/offers/{offer_id}")
 async def cancel_offer(
     offer_id: int,
@@ -269,8 +323,9 @@ async def cancel_offer(
         raise HTTPException(status_code=403, detail="Нет доступа")
 
     request = await db.get(TripRequest, offer.request_id)
+    was_accepted = request is not None and request.status == TripRequestStatus.accepted
 
-    if request and request.status == TripRequestStatus.accepted:
+    if was_accepted:
         # Отменяем поездку и бронь, возвращаем заявку в open
         if offer.trip_id:
             trip = await db.get(Trip, offer.trip_id)
@@ -304,6 +359,24 @@ async def cancel_offer(
 
         request.status = TripRequestStatus.open
 
+    # Уведомить пассажира
+    if request:
+        passenger = await db.get(User, request.passenger_id)
+        if passenger and passenger.fcm_token:
+            driver_user = await db.get(User, current_user.get("user_id"))
+            driver_name = driver_user.name if driver_user else "Водитель"
+            from app.services.firebase_service import send_push
+            if was_accepted:
+                title = "Водитель отменил поездку"
+                body = f"{driver_name} отменил принятую поездку. Заявка снова открыта."
+            else:
+                title = "Водитель отозвал отклик"
+                body = f"{driver_name} отозвал свой отклик"
+            try:
+                send_push(passenger.fcm_token, title, body)
+            except Exception:
+                pass
+
     await db.delete(offer)
     await db.commit()
     return {"message": "Отклик отозван"}
@@ -323,15 +396,16 @@ async def get_offers(
         raise HTTPException(status_code=403, detail="Это не ваша заявка")
 
     result = await db.execute(
-        select(TripOffer, User)
+        select(TripOffer, User, DriverProfile)
         .join(User, TripOffer.driver_id == User.id)
+        .outerjoin(DriverProfile, DriverProfile.user_id == TripOffer.driver_id)
         .where(TripOffer.request_id == request_id)
         .order_by(TripOffer.id.asc())
     )
     rows = result.all()
 
     output = []
-    for offer, driver in rows:
+    for offer, driver, profile in rows:
         seats_needed = request.seats_needed or 1
         price = float(offer.price_per_seat) if offer.price_per_seat else 0.0
         output.append({
@@ -341,6 +415,11 @@ async def get_offers(
             "price_per_seat": price,
             "total_price": price * seats_needed,
             "created_at": offer.created_at.isoformat() if offer.created_at else None,
+            "car_brand": profile.car_brand if profile else None,
+            "car_model": profile.car_model if profile else None,
+            "car_color": profile.car_color if profile else None,
+            "car_number": profile.car_number if profile else None,
+            "car_year": profile.car_year if profile else None,
         })
     return output
 

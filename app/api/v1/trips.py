@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.db.database import get_db
 from app.models.trip import Trip, TripStatus
 from app.models.trip_request import TripOffer, TripRequest, TripRequestStatus
+from app.models.booking import Booking, BookingStatus
 from app.models.route import Route
 from app.models.user import User
 from datetime import datetime
@@ -123,7 +124,24 @@ async def complete_trip(
     if trip.status != TripStatus.active:
         raise HTTPException(status_code=400, detail="Поездка уже завершена или отменена")
     trip.status = TripStatus.completed
+
+    bookings_result = await db.execute(
+        select(Booking).where(Booking.trip_id == trip_id, Booking.status == BookingStatus.confirmed)
+    )
+    bookings = bookings_result.scalars().all()
     await db.commit()
+
+    driver_user = await db.get(User, current_user.get("user_id"))
+    driver_name = driver_user.name if driver_user else "Водитель"
+    from app.services.firebase_service import send_push
+    for booking in bookings:
+        passenger = await db.get(User, booking.passenger_id)
+        if passenger and passenger.fcm_token:
+            try:
+                send_push(passenger.fcm_token, "Поездка завершена", f"Оцените поездку с водителем {driver_name}")
+            except Exception:
+                pass
+
     return {"message": "Поездка завершена"}
 
 
@@ -142,5 +160,90 @@ async def cancel_trip(
     if trip.status != TripStatus.active:
         raise HTTPException(status_code=400, detail="Поездка уже завершена или отменена")
     trip.status = TripStatus.cancelled
+
+    bookings_result = await db.execute(
+        select(Booking).where(Booking.trip_id == trip_id, Booking.status == BookingStatus.confirmed)
+    )
+    bookings = bookings_result.scalars().all()
     await db.commit()
+
+    driver_user = await db.get(User, current_user.get("user_id"))
+    driver_name = driver_user.name if driver_user else "Водитель"
+    from app.services.firebase_service import send_push
+    for booking in bookings:
+        passenger = await db.get(User, booking.passenger_id)
+        if passenger and passenger.fcm_token:
+            try:
+                send_push(passenger.fcm_token, "Поездка отменена", f"{driver_name} отменил поездку")
+            except Exception:
+                pass
+
     return {"message": "Поездка отменена"}
+
+
+@router.patch("/{trip_id}/departing")
+async def trip_departing(
+    trip_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Водитель нажимает 'Выезжаю' — уведомляет пассажиров."""
+    trip = await db.get(Trip, trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Поездка не найдена")
+    if trip.driver_id != current_user.get("user_id"):
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    if trip.status != TripStatus.active:
+        raise HTTPException(status_code=400, detail="Поездка не активна")
+
+    bookings_result = await db.execute(
+        select(Booking).where(Booking.trip_id == trip_id, Booking.status == BookingStatus.confirmed)
+    )
+    bookings = bookings_result.scalars().all()
+
+    driver_user = await db.get(User, current_user.get("user_id"))
+    driver_name = driver_user.name if driver_user else "Водитель"
+    from app.services.firebase_service import send_push
+    for booking in bookings:
+        passenger = await db.get(User, booking.passenger_id)
+        if passenger and passenger.fcm_token:
+            try:
+                send_push(passenger.fcm_token, "Водитель выехал!", f"{driver_name} уже едет к вам")
+            except Exception:
+                pass
+
+    return {"message": "Пассажиры уведомлены"}
+
+
+@router.patch("/{trip_id}/arrived")
+async def trip_arrived(
+    trip_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Водитель нажимает 'Подъехал' — уведомляет пассажиров."""
+    trip = await db.get(Trip, trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Поездка не найдена")
+    if trip.driver_id != current_user.get("user_id"):
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    if trip.status != TripStatus.active:
+        raise HTTPException(status_code=400, detail="Поездка не активна")
+
+    bookings_result = await db.execute(
+        select(Booking).where(Booking.trip_id == trip_id, Booking.status == BookingStatus.confirmed)
+    )
+    bookings = bookings_result.scalars().all()
+
+    driver_user = await db.get(User, current_user.get("user_id"))
+    driver_name = driver_user.name if driver_user else "Водитель"
+    from app.services.firebase_service import send_push
+    for booking in bookings:
+        passenger = await db.get(User, booking.passenger_id)
+        if passenger and passenger.fcm_token:
+            try:
+                send_push(passenger.fcm_token, "Водитель подъехал!", f"{driver_name} ждёт вас. Выходите!")
+            except Exception:
+                pass
+
+    return {"message": "Пассажиры уведомлены о прибытии"}
