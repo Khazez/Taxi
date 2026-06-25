@@ -110,6 +110,7 @@ async def get_my_requests(
                 offer_obj, driver, profile = offer_row
                 item["driver_name"] = driver.name
                 item["driver_phone"] = driver.phone
+                item["driver_user_id"] = driver.id
                 if offer_obj.price_per_seat:
                     item["agreed_price"] = float(offer_obj.price_per_seat) * (req.seats_needed or 1)
                 if profile:
@@ -118,6 +119,27 @@ async def get_my_requests(
                     item["car_color"] = profile.car_color
                     item["car_number"] = profile.car_number
                     item["car_year"] = profile.car_year
+                # Найти trip_id и trip_status
+                trip_id = offer_obj.trip_id
+                if trip_id:
+                    trip = await db.get(Trip, trip_id)
+                    item["trip_id"] = trip_id
+                    item["trip_status"] = trip.status.value if trip else None
+                else:
+                    # Fallback для старых записей
+                    b_result = await db.execute(
+                        select(Booking, Trip)
+                        .join(Trip, Booking.trip_id == Trip.id)
+                        .where(Booking.passenger_id == passenger_id)
+                        .where(Trip.driver_id == driver.id)
+                        .where(Trip.route_id == req.route_id)
+                        .order_by(Booking.id.desc()).limit(1)
+                    )
+                    b_row = b_result.first()
+                    if b_row:
+                        b, t = b_row
+                        item["trip_id"] = t.id
+                        item["trip_status"] = t.status.value
         output.append(item)
 
     return output
@@ -459,6 +481,7 @@ async def accept_offer(
         )
         db.add(trip)
         await db.flush()
+        offer.trip_id = trip.id
 
     booking = Booking(
         trip_id=trip.id,

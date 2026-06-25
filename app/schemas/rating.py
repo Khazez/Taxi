@@ -5,7 +5,8 @@ from datetime import datetime
 class RatingCreate(BaseModel):
     trip_id: int
     to_user_id: int
-    score: int = Field(..., ge=1, le=5)  # только от 1 до 5
+    score: int = Field(..., ge=1, le=5)
+    comment: str | None = None
 
 
 class RatingOut(BaseModel):
@@ -14,6 +15,7 @@ class RatingOut(BaseModel):
     from_user_id: int
     to_user_id: int
     score: int
+    comment: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

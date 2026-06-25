@@ -12,6 +12,7 @@ class Rating(Base):
     from_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     to_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     score = Column(Integer, nullable=False)  # от 1 до 5
+    comment = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     trip = relationship("Trip", back_populates="ratings")
