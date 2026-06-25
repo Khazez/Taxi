@@ -148,10 +148,13 @@ async def update_me(
 async def update_fcm_token(
     token: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """Пользователь обновляет FCM токен своего устройства."""
-    current_user.fcm_token = token
+    user = await db.get(User, current_user.get("user_id"))
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    user.fcm_token = token
     await db.commit()
     return {"message": "FCM токен обновлён"}
 @router.post("/admin/login")

@@ -236,6 +236,22 @@ async def create_offer(
     db.add(offer)
     await db.commit()
     await db.refresh(offer)
+
+    # Уведомить пассажира о новом отклике
+    passenger = await db.get(User, request.passenger_id)
+    if passenger and passenger.fcm_token:
+        driver_user = await db.get(User, current_user.get("user_id"))
+        driver_name = driver_user.name if driver_user else "Водитель"
+        from app.services.firebase_service import send_push
+        try:
+            send_push(
+                passenger.fcm_token,
+                "Новый отклик!",
+                f"{driver_name} предлагает {int(data.price_per_seat)} ₸",
+            )
+        except Exception:
+            pass
+
     return {"id": offer.id, "request_id": offer.request_id, "price_per_seat": float(data.price_per_seat)}
 
 
