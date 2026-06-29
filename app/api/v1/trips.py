@@ -80,6 +80,8 @@ async def get_trips(
             "seats_available": t.seats_available,
             "price_per_seat": float(t.price_per_seat),
             "status": t.status.value,
+            "is_departed": t.is_departed or False,
+            "is_arrived": t.is_arrived or False,
         }
         for t in trips
     ]}
@@ -196,6 +198,9 @@ async def trip_departing(
     if trip.status != TripStatus.active:
         raise HTTPException(status_code=400, detail="Поездка не активна")
 
+    trip.is_departed = True
+    await db.commit()
+
     bookings_result = await db.execute(
         select(Booking).where(Booking.trip_id == trip_id, Booking.status == BookingStatus.confirmed)
     )
@@ -229,6 +234,9 @@ async def trip_arrived(
         raise HTTPException(status_code=403, detail="Нет доступа")
     if trip.status != TripStatus.active:
         raise HTTPException(status_code=400, detail="Поездка не активна")
+
+    trip.is_arrived = True
+    await db.commit()
 
     bookings_result = await db.execute(
         select(Booking).where(Booking.trip_id == trip_id, Booking.status == BookingStatus.confirmed)

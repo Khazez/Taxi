@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Numeric, ForeignKey, DateTime, String, Enum
+from sqlalchemy import Boolean, Column, Integer, Numeric, ForeignKey, DateTime, String, Enum
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.database import Base
@@ -22,6 +22,8 @@ class Trip(Base):
     seats_available = Column(Integer, nullable=False)
     price_per_seat = Column(Numeric(10, 2), nullable=False)
     status = Column(Enum(TripStatus), default=TripStatus.active)
+    is_departed = Column(Boolean, default=False, server_default="false")
+    is_arrived  = Column(Boolean, default=False, server_default="false")
     created_at = Column(DateTime, server_default=func.now())
 
     ratings = relationship("Rating", back_populates="trip")

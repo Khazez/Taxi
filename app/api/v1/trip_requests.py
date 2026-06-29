@@ -1,17 +1,19 @@
 import json as _json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.trip_request import TripRequest, TripRequestStatus, TripOffer
+from app.models.driver_profile import DriverProfile, OFFER_PRICE
 from app.models.trip import Trip, TripStatus
 from app.models.booking import Booking, BookingStatus
 from app.models.user import User
 from app.models.route import Route
 from app.models.driver_profile import DriverProfile
+from app.models.rating import Rating
 
 from app.schemas.trip_request import TripRequestCreate, TripRequestOut
 
@@ -50,7 +52,7 @@ async def create_request(
     return request
 
 
-@router.get("/", response_model=list[TripRequestOut])
+@router.get("/")
 async def get_open_requests(
     route_id: int | None = None,
     db: AsyncSession = Depends(get_db),
@@ -61,7 +63,42 @@ async def get_open_requests(
     if route_id is not None:
         query = query.where(TripRequest.route_id == route_id)
     result = await db.execute(query)
-    return result.scalars().all()
+    requests = result.scalars().all()
+
+    # Получаем средние рейтинги пассажиров одним запросом
+    passenger_ids = list({r.passenger_id for r in requests})
+    avg_map: dict[int, float | None] = {}
+    if passenger_ids:
+        avg_result = await db.execute(
+            select(Rating.to_user_id, func.avg(Rating.score))
+            .where(Rating.to_user_id.in_(passenger_ids))
+            .group_by(Rating.to_user_id)
+        )
+        avg_map = {row[0]: round(float(row[1]), 1) for row in avg_result.all()}
+
+    output = []
+    for r in requests:
+        output.append({
+            "id": r.id,
+            "passenger_id": r.passenger_id,
+            "route_id": r.route_id,
+            "departure_date": r.departure_date.isoformat() if r.departure_date else None,
+            "seats_needed": r.seats_needed,
+            "comment": r.comment,
+            "status": r.status.value,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "pickup_address": r.pickup_address,
+            "entrance": r.entrance,
+            "extra_pickups": _json.loads(r.extra_pickups) if r.extra_pickups else [],
+            "destination_address": r.destination_address,
+            "destination_entrance": r.destination_entrance,
+            "extra_destinations": _json.loads(r.extra_destinations) if r.extra_destinations else [],
+            "contact_name": r.contact_name,
+            "contact_phone": r.contact_phone,
+            "payment_type": r.payment_type,
+            "passenger_avg_rating": avg_map.get(r.passenger_id),
+        })
+    return output
 
 
 @router.get("/my")
@@ -119,12 +156,25 @@ async def get_my_requests(
                     item["car_color"] = profile.car_color
                     item["car_number"] = profile.car_number
                     item["car_year"] = profile.car_year
-                # Найти trip_id и trip_status
+                # Найти trip_id, trip_status и booking_id
                 trip_id = offer_obj.trip_id
                 if trip_id:
                     trip = await db.get(Trip, trip_id)
                     item["trip_id"] = trip_id
                     item["trip_status"] = trip.status.value if trip else None
+                    item["is_departed"] = bool(trip.is_departed) if trip else False
+                    item["is_arrived"]  = bool(trip.is_arrived)  if trip else False
+                    # booking_id нужен пассажиру для отмены
+                    b_res = await db.execute(
+                        select(Booking).where(
+                            Booking.trip_id == trip_id,
+                            Booking.passenger_id == passenger_id,
+                            Booking.status == BookingStatus.confirmed,
+                        ).limit(1)
+                    )
+                    b_obj = b_res.scalar_one_or_none()
+                    if b_obj:
+                        item["booking_id"] = b_obj.id
                 else:
                     # Fallback для старых записей
                     b_result = await db.execute(
@@ -140,6 +190,7 @@ async def get_my_requests(
                         b, t = b_row
                         item["trip_id"] = t.id
                         item["trip_status"] = t.status.value
+                        item["booking_id"] = b.id
         output.append(item)
 
     return output
@@ -221,8 +272,8 @@ async def cancel_request(
         raise HTTPException(status_code=404, detail="Заявка не найдена")
     if request.passenger_id != current_user.get("user_id"):
         raise HTTPException(status_code=403, detail="Нет доступа")
-    if request.status != TripRequestStatus.open:
-        raise HTTPException(status_code=400, detail="Нельзя отменить принятую заявку")
+    if request.status not in (TripRequestStatus.open, TripRequestStatus.accepted):
+        raise HTTPException(status_code=400, detail="Заявка уже отменена")
 
     request.status = TripRequestStatus.cancelled
 
@@ -230,14 +281,31 @@ async def cancel_request(
         select(TripOffer).where(TripOffer.request_id == request_id)
     )
     offers = offers_result.scalars().all()
+
+    # Если заявка была принята — отменяем бронь и уведомляем водителя
+    notified_drivers: set[int] = set()
+    for offer in offers:
+        if offer.trip_id:
+            b_res = await db.execute(
+                select(Booking).where(
+                    Booking.trip_id == offer.trip_id,
+                    Booking.passenger_id == request.passenger_id,
+                )
+            )
+            booking = b_res.scalar_one_or_none()
+            if booking:
+                booking.status = BookingStatus.cancelled
+        if offer.driver_id not in notified_drivers:
+            notified_drivers.add(offer.driver_id)
+
     await db.commit()
 
     from app.services.firebase_service import send_push
-    for offer in offers:
-        driver = await db.get(User, offer.driver_id)
+    for driver_id in notified_drivers:
+        driver = await db.get(User, driver_id)
         if driver and driver.fcm_token:
             try:
-                send_push(driver.fcm_token, "Заявка отменена", "Пассажир отменил заявку")
+                send_push(driver.fcm_token, "Пассажир отменил поездку", "Пассажир отменил принятый заказ")
             except Exception:
                 pass
 
@@ -271,6 +339,21 @@ async def create_offer(
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Вы уже откликнулись на эту заявку")
+
+    # Проверяем и списываем баланс
+    driver_profile = await db.execute(
+        select(DriverProfile).where(DriverProfile.user_id == current_user.get("user_id"))
+    )
+    driver_profile = driver_profile.scalar_one_or_none()
+    if not driver_profile:
+        raise HTTPException(status_code=400, detail="Профиль водителя не найден")
+    current_balance = float(driver_profile.balance or 0)
+    if current_balance < OFFER_PRICE:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Недостаточно средств. Нужно {OFFER_PRICE} ₸, на балансе {int(current_balance)} ₸"
+        )
+    driver_profile.balance = current_balance - OFFER_PRICE
 
     offer = TripOffer(
         request_id=data.request_id,
@@ -442,6 +525,7 @@ async def get_offers(
             "car_color": profile.car_color if profile else None,
             "car_number": profile.car_number if profile else None,
             "car_year": profile.car_year if profile else None,
+            "driver_avg_rating": round(float(profile.rating), 1) if profile and profile.rating else None,
         })
     return output
 

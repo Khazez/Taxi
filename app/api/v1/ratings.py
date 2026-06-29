@@ -111,18 +111,103 @@ async def get_pending_ratings(
     return pending
 
 
-@router.get("/user/{user_id}", response_model=dict)
+@router.get("/received")
+async def get_received_ratings(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Оценки, полученные текущим пользователем (от пассажиров или водителей)."""
+    user_id = current_user.get("user_id")
+    result = await db.execute(
+        select(Rating, User)
+        .join(User, Rating.from_user_id == User.id)
+        .where(Rating.to_user_id == user_id)
+        .order_by(Rating.created_at.desc())
+    )
+    rows = result.all()
+    return [
+        {
+            "id": r.id,
+            "score": r.score,
+            "comment": r.comment,
+            "from_name": u.name,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r, u in rows
+    ]
+
+
+@router.get("/pending-driver")
+async def get_pending_ratings_driver(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Завершённые поездки водителя, где он ещё не оценил пассажира."""
+    driver_id = current_user.get("user_id")
+
+    result = await db.execute(
+        select(Booking, Trip, Route, User)
+        .join(Trip, Booking.trip_id == Trip.id)
+        .join(Route, Trip.route_id == Route.id)
+        .join(User, Booking.passenger_id == User.id)
+        .where(Trip.driver_id == driver_id)
+        .where(Trip.status == TripStatus.completed)
+        .where(Booking.status == BookingStatus.confirmed)
+    )
+    rows = result.all()
+
+    pending = []
+    for booking, trip, route, passenger in rows:
+        existing = await db.execute(
+            select(Rating).where(
+                Rating.trip_id == trip.id,
+                Rating.from_user_id == driver_id,
+                Rating.to_user_id == passenger.id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            continue
+        pending.append({
+            "trip_id": trip.id,
+            "passenger_user_id": passenger.id,
+            "passenger_name": passenger.name,
+            "route_name": f"{route.city_from} → {route.city_to}",
+        })
+
+    return pending
+
+
+@router.get("/user/{user_id}")
 async def get_user_rating(
     user_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    """Средний рейтинг и список отзывов пользователя."""
+    avg_result = await db.execute(
         select(func.avg(Rating.score), func.count(Rating.id))
         .where(Rating.to_user_id == user_id)
     )
-    avg_score, total = result.one()
+    avg_score, total = avg_result.one()
+
+    reviews_result = await db.execute(
+        select(Rating, User)
+        .join(User, Rating.from_user_id == User.id)
+        .where(Rating.to_user_id == user_id)
+        .order_by(Rating.created_at.desc())
+    )
+    reviews = [
+        {
+            "score": r.score,
+            "comment": r.comment,
+            "from_name": u.name,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r, u in reviews_result.all()
+    ]
+
     return {
         "user_id": user_id,
         "average_score": round(float(avg_score), 2) if avg_score else None,
         "total_ratings": total,
+        "reviews": reviews,
     }

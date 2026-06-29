@@ -74,9 +74,10 @@ async def get_my_bookings(
     current_user: dict = Depends(get_current_user),
 ):
     result = await db.execute(
-        select(Booking, Trip, Route)
+        select(Booking, Trip, Route, User)
         .join(Trip, Booking.trip_id == Trip.id)
         .join(Route, Trip.route_id == Route.id)
+        .join(User, Trip.driver_id == User.id)
         .where(Booking.passenger_id == current_user.get("user_id"))
         .order_by(Booking.id.desc())
     )
@@ -86,6 +87,8 @@ async def get_my_bookings(
             "id": b.id,
             "trip_id": b.trip_id,
             "driver_id": t.driver_id,
+            "driver_name": u.name,
+            "driver_phone": u.phone,
             "seats_count": b.seats_count,
             "total_price": float(b.total_price),
             "status": b.status.value,
@@ -102,7 +105,7 @@ async def get_my_bookings(
             "contact_phone": b.contact_phone,
             "comment": b.comment,
         }
-        for b, t, r in rows
+        for b, t, r, u in rows
     ]
 
 
@@ -129,6 +132,7 @@ async def get_driver_bookings(
             "route_name": f"{r.city_from} → {r.city_to}",
             "departure_time": t.departure_time.isoformat() if t.departure_time else None,
             "trip_status": t.status.value,
+            "passenger_id": u.id,
             "passenger_name": u.name,
             "passenger_phone": u.phone,
             "seats_count": b.seats_count,

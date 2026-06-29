@@ -11,6 +11,15 @@ from app.schemas.settings import SettingOut, SettingUpdate
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
+@router.get("/public", response_model=list[SettingOut])
+async def get_public_settings(db: AsyncSession = Depends(get_db)):
+    """Публичные настройки без авторизации — только support_* ключи."""
+    result = await db.execute(
+        select(PlatformSettings).where(PlatformSettings.key.like("support_%"))
+    )
+    return result.scalars().all()
+
+
 @router.get("/", response_model=list[SettingOut])
 async def get_all_settings(
     db: AsyncSession = Depends(get_db),
@@ -31,8 +40,8 @@ async def update_setting(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Админ меняет значение настройки."""
-    if current_user.role != UserRole.admin:
+    """Админ меняет значение настройки (upsert)."""
+    if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Только администратор")
 
     result = await db.execute(
@@ -40,9 +49,10 @@ async def update_setting(
     )
     setting = result.scalar_one_or_none()
     if not setting:
-        raise HTTPException(status_code=404, detail="Настройка не найдена")
-
-    setting.value = data.value
+        setting = PlatformSettings(key=key, value=data.value)
+        db.add(setting)
+    else:
+        setting.value = data.value
     await db.commit()
     await db.refresh(setting)
     return setting
