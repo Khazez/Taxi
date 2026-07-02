@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.db.database import get_db
 from app.models.driver_profile import DriverProfile, OFFER_PRICE
 from app.models.user import User
+from app.models.settings import PlatformSettings
 from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
@@ -157,7 +158,12 @@ async def get_balance(
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Профиль не найден")
-    return {"balance": float(profile.balance or 0), "offer_price": OFFER_PRICE}
+    price_setting = await db.execute(
+        select(PlatformSettings).where(PlatformSettings.key == "offer_price")
+    )
+    price_setting = price_setting.scalar_one_or_none()
+    offer_price = float(price_setting.value) if price_setting else float(OFFER_PRICE)
+    return {"balance": float(profile.balance or 0), "offer_price": offer_price}
 
 
 @router.post("/balance/topup")

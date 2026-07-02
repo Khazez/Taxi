@@ -14,6 +14,7 @@ from app.models.user import User
 from app.models.route import Route
 from app.models.driver_profile import DriverProfile
 from app.models.rating import Rating
+from app.models.settings import PlatformSettings
 
 from app.schemas.trip_request import TripRequestCreate, TripRequestOut
 
@@ -340,6 +341,13 @@ async def create_offer(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Вы уже откликнулись на эту заявку")
 
+    # Читаем актуальную цену отклика из настроек (fallback: OFFER_PRICE=50)
+    price_setting = await db.execute(
+        select(PlatformSettings).where(PlatformSettings.key == "offer_price")
+    )
+    price_setting = price_setting.scalar_one_or_none()
+    offer_price = float(price_setting.value) if price_setting else float(OFFER_PRICE)
+
     # Проверяем и списываем баланс
     driver_profile = await db.execute(
         select(DriverProfile).where(DriverProfile.user_id == current_user.get("user_id"))
@@ -348,12 +356,12 @@ async def create_offer(
     if not driver_profile:
         raise HTTPException(status_code=400, detail="Профиль водителя не найден")
     current_balance = float(driver_profile.balance or 0)
-    if current_balance < OFFER_PRICE:
+    if current_balance < offer_price:
         raise HTTPException(
             status_code=402,
-            detail=f"Недостаточно средств. Нужно {OFFER_PRICE} ₸, на балансе {int(current_balance)} ₸"
+            detail=f"Недостаточно средств. Нужно {int(offer_price)} ₸, на балансе {int(current_balance)} ₸"
         )
-    driver_profile.balance = current_balance - OFFER_PRICE
+    driver_profile.balance = current_balance - offer_price
 
     offer = TripOffer(
         request_id=data.request_id,
