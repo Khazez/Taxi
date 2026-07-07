@@ -1,4 +1,5 @@
 import asyncio
+import os
 import asyncpg
 import bcrypt
 
@@ -7,8 +8,12 @@ PASSWORD = "Admin1234"
 NAME     = "Admin"
 PHONE    = "+70000000000"
 
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mezhgorod"
+).replace("postgresql+asyncpg://", "postgresql://")
+
 async def main():
-    conn = await asyncpg.connect("postgresql://postgres:postgres@localhost:5432/mezhgorod")
+    conn = await asyncpg.connect(DATABASE_URL)
 
     hashed = bcrypt.hashpw(PASSWORD.encode(), bcrypt.gensalt()).decode()
 
