@@ -27,13 +27,18 @@ def _normalize(phone: str) -> str:
     return f'+{digits}' if digits.startswith('7') else phone
 
 
-TEST_PHONE = "+77009998877"  # для демонстрации без реального SMS-шлюза
+# для демонстрации без реального SMS-шлюза
+TEST_PHONES = {
+    "+77009998877",  # пассажир (новый, без профиля)
+    "+77001112233",  # водитель Алибек — уже верифицирован, Toyota Camry
+    "+77001112244",  # водитель Ержан — уже верифицирован, Hyundai Sonata
+}
 TEST_CODE = "0000"
 
 
 def _gen_otp(phone: str) -> str:
     key = _normalize(phone)
-    code = TEST_CODE if key == TEST_PHONE else str(random.randint(1000, 9999))
+    code = TEST_CODE if key in TEST_PHONES else str(random.randint(1000, 9999))
     _otp_store[key] = (code, time.time() + 300)
     return code
 
