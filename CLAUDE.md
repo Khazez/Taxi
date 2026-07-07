@@ -158,7 +158,22 @@ taxi-backend/
 ```
 
 ## Утилиты
-- `create_admin.py` — создаёт/обновляет admin-пользователя (email: admin@zholaushy.kz, пароль: Admin1234)
+- `create_admin.py` — создаёт/обновляет admin-пользователя (email: admin@zholaushy.kz, пароль: Admin1234); читает `DATABASE_URL` из окружения, можно гонять и локально, и на Railway
+- `seed_routes_prod.py` — сидирует 10 реальных маршрутов Актобе (+ обратные) в прод-БД
+- `seed_test_drivers_prod.py` — создаёт 2 верифицированных тестовых водителя (Алибек/Toyota Camry, Ержан/Hyundai Sonata) для демо
+- `check_schema_prod.py` — сравнивает SQLAlchemy-модели с реальной схемой БД, находит расхождения (полезно, т.к. часть колонок добавлялась вручную мимо Alembic)
+- `fix_schema_prod.py` — идемпотентно докатывает недостающие таблицы/колонки на прод
+
+## Деплой (Railway)
+- **Публичный URL:** https://taxi-production-8544.up.railway.app/ (Swagger: `/docs`)
+- Проект Railway: workspace `trustworthy-patience`, environment `production`, сервис `Taxi` (+ отдельный сервис Postgres в том же проекте)
+- `REDIS_URL: str = ""` в `app/core/config.py` — Redis нигде не используется, было обязательным полем без дефолта, ломало билд
+- `Dockerfile`: слушает `${PORT:-8000}`, перед стартом гоняет `alembic upgrade head`
+- `app/db/database.py`: авто-приведение `DATABASE_URL` к схеме `postgresql+asyncpg://` (Railway Postgres даёт голый `postgresql://`)
+- В Railway Variables `DATABASE_URL` должен быть Reference на Postgres-сервис (`${{Postgres.DATABASE_URL}}`), НЕ голая строка
+- `FIREBASE_CREDENTIALS_JSON` — ключ Firebase как JSON-строка в env var (приоритет над `FIREBASE_CREDENTIALS_PATH`); если не задан — push молча отключается
+- OTP-логин без реального SMS-шлюза: код печатается в лог; для демо — фиксированный код `0000` для номеров `+77009998877` (пассажир), `+77001112233`/`+77001112244` (тестовые водители), см. `TEST_PHONES` в `app/api/v1/auth.py`
+- ⚠️ **Инцидент (устранён):** `firebase-key.json.json` был закоммичен в git с реальным приватным ключом и запушен в публичный репо (19.06.2026, коммит `4be720f`) — `.gitignore` ловил только точное имя `firebase-key.json`. Ключ отозван и заменён, `.gitignore` ужесточён до `firebase-key*.json*`. История git всё ещё содержит старый (уже недействительный) ключ в том коммите.
 
 ## Что НЕ сделано (после МВП)
 - [ ] WebSocket — real-time обновления вместо поллинга
