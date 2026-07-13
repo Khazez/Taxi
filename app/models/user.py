@@ -22,6 +22,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(Enum(UserRole), default=UserRole.passenger)
     fcm_token = Column(String, nullable=True)  # токен устройства для push
+    avatar_url = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     agreements = relationship("Agreement", lazy="noload")

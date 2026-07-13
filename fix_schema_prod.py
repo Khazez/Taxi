@@ -46,6 +46,8 @@ ADD_COLUMNS = [
     "ALTER TABLE trip_requests ADD COLUMN IF NOT EXISTS payment_type VARCHAR DEFAULT 'cash'",
 
     "ALTER TABLE trip_offers ADD COLUMN IF NOT EXISTS price_per_seat NUMERIC(10,2)",
+
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR",
 ]
 
 

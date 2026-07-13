@@ -77,6 +77,13 @@ async def get_open_requests(
         )
         avg_map = {row[0]: round(float(row[1]), 1) for row in avg_result.all()}
 
+    avatar_map: dict[int, str | None] = {}
+    if passenger_ids:
+        avatar_result = await db.execute(
+            select(User.id, User.avatar_url).where(User.id.in_(passenger_ids))
+        )
+        avatar_map = dict(avatar_result.all())
+
     output = []
     for r in requests:
         output.append({
@@ -98,6 +105,7 @@ async def get_open_requests(
             "contact_phone": r.contact_phone,
             "payment_type": r.payment_type,
             "passenger_avg_rating": avg_map.get(r.passenger_id),
+            "passenger_avatar_url": avatar_map.get(r.passenger_id),
         })
     return output
 
@@ -149,6 +157,7 @@ async def get_my_requests(
                 item["driver_name"] = driver.name
                 item["driver_phone"] = driver.phone
                 item["driver_user_id"] = driver.id
+                item["driver_avatar_url"] = driver.avatar_url
                 if offer_obj.price_per_seat:
                     item["agreed_price"] = float(offer_obj.price_per_seat) * (req.seats_needed or 1)
                 if profile:
@@ -525,6 +534,7 @@ async def get_offers(
             "id": offer.id,
             "driver_name": driver.name,
             "driver_phone": driver.phone,
+            "driver_avatar_url": driver.avatar_url,
             "price_per_seat": price,
             "total_price": price * seats_needed,
             "created_at": offer.created_at.isoformat() if offer.created_at else None,

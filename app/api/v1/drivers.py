@@ -67,7 +67,8 @@ async def get_driver_profile(
     profile = result.scalar_one_or_none()
     if not profile:
         raise HTTPException(status_code=404, detail="Профиль не найден")
-    return {"data": _profile_dict(profile)}
+    user = await db.get(User, profile.user_id)
+    return {"data": {**_profile_dict(profile), "avatar_url": user.avatar_url if user else None}}
 
 
 @router.patch("/profile/vehicle")
@@ -118,6 +119,7 @@ async def get_all_drivers(
             **_profile_dict(p),
             "name": user.name if user else "",
             "phone": user.phone if user else "",
+            "avatar_url": user.avatar_url if user else None,
         })
     return {"data": out}
 
@@ -143,6 +145,7 @@ async def get_unverified_drivers(
             **_profile_dict(p),
             "name": user.name if user else "",
             "phone": user.phone if user else "",
+            "avatar_url": user.avatar_url if user else None,
         })
     return {"data": out}
 

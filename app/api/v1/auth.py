@@ -140,6 +140,7 @@ async def get_me(
         "name": user.name,
         "phone": user.phone,
         "role": user.role.value,
+        "avatar_url": user.avatar_url,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
