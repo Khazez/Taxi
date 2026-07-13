@@ -267,11 +267,11 @@ async def cancel_request(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Пассажир отменяет заявку."""
+    """Пассажир (или админ) отменяет заявку."""
     request = await db.get(TripRequest, request_id)
     if not request:
         raise HTTPException(status_code=404, detail="Заявка не найдена")
-    if request.passenger_id != current_user.get("user_id"):
+    if request.passenger_id != current_user.get("user_id") and current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Нет доступа")
     if request.status not in (TripRequestStatus.open, TripRequestStatus.accepted):
         raise HTTPException(status_code=400, detail="Заявка уже отменена")

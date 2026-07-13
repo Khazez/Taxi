@@ -9,6 +9,7 @@ from app.models.trip import Trip
 from app.models.booking import Booking
 from app.models.driver_profile import DriverProfile
 from app.models.route import Route
+from app.models.trip_request import TripRequest, TripOffer
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -60,5 +61,45 @@ async def get_all_trips(
                 "status": trip.status.value if hasattr(trip.status, 'value') else trip.status,
             }
             for trip, route in rows
+        ]
+    }
+
+
+@router.get("/trip-requests")
+async def get_all_trip_requests(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(TripRequest, Route, User)
+        .join(Route, TripRequest.route_id == Route.id)
+        .join(User, TripRequest.passenger_id == User.id)
+        .order_by(TripRequest.id.desc())
+    )
+    rows = result.all()
+
+    offers_count_result = await db.execute(
+        select(TripOffer.request_id, func.count(TripOffer.id)).group_by(TripOffer.request_id)
+    )
+    offers_count = dict(offers_count_result.all())
+
+    return {
+        "data": [
+            {
+                "id": req.id,
+                "passenger_name": passenger.name,
+                "passenger_phone": passenger.phone,
+                "route_name": f"{route.city_from} → {route.city_to}",
+                "departure_date": req.departure_date.isoformat() if req.departure_date else None,
+                "seats_needed": req.seats_needed,
+                "comment": req.comment,
+                "status": req.status.value if hasattr(req.status, "value") else req.status,
+                "payment_type": req.payment_type,
+                "pickup_address": req.pickup_address,
+                "destination_address": req.destination_address,
+                "offers_count": offers_count.get(req.id, 0),
+                "created_at": req.created_at.isoformat() if req.created_at else None,
+            }
+            for req, route, passenger in rows
         ]
     }

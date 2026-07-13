@@ -153,11 +153,11 @@ async def cancel_trip(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Водитель отменяет поездку."""
+    """Водитель (или админ) отменяет поездку."""
     trip = await db.get(Trip, trip_id)
     if not trip:
         raise HTTPException(status_code=404, detail="Поездка не найдена")
-    if trip.driver_id != current_user.get("user_id"):
+    if trip.driver_id != current_user.get("user_id") and current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Нет доступа")
     if trip.status != TripStatus.active:
         raise HTTPException(status_code=400, detail="Поездка уже завершена или отменена")
